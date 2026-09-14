@@ -1,4 +1,9 @@
 <!doctype html>
+<!-- fluxus-pagina: 2 -->
+<!-- Sube el numero al cambiar esta pagina en el programa: el equipo
+     solo sustituye la publicada si la suya es mas nueva. Si editas
+     esto a mano en GitHub, deja el numero como esta y no te lo
+     pisara. -->
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -79,6 +84,32 @@
   @media (prefers-color-scheme: dark) {
     .col.es-ahora { background: rgba(224,137,74,.16); }
   }
+  .col { cursor: default; }
+  /* Resaltado: se aclara la barra y se marca la columna, para que se vea
+     cual se esta consultando incluso con barras de 4 px. */
+  /* Tiene que distinguirse de .es-ahora, que marca la hora actual en
+     naranja: el resaltado usa el color de acento y un contorno claro en la
+     barra, porque un fondo tenue no se ve sobre una barra alta y brillante. */
+  .col.mirada { background: color-mix(in srgb, var(--acento) 30%, transparent);
+                border-radius: 5px; }
+  .col.mirada .barra { filter: brightness(1.25) saturate(1.15);
+                       box-shadow: inset 0 0 0 2px var(--tinta); }
+  @supports not (background: color-mix(in srgb, red 10%, transparent)) {
+    .col.mirada { background: rgba(128, 128, 128, .34); }
+  }
+
+  .globo {
+    position: absolute; z-index: 5; pointer-events: none;
+    background: var(--tinta); color: var(--fondo);
+    border-radius: 9px; padding: 8px 11px; font-size: .78rem;
+    line-height: 1.45; white-space: nowrap; opacity: 0;
+    transition: opacity .12s; box-shadow: 0 4px 14px rgba(0,0,0,.28);
+  }
+  .globo.visible { opacity: 1; }
+  .globo b { font-size: .9rem; }
+  .globo .gente { color: var(--acento); font-weight: 700; }
+  #zona-grafica { position: relative; }
+
   .horas { display: flex; gap: var(--hueco, 3px); }
   .horas span { flex: 1 1 0; text-align: center; font-size: .68rem;
                 color: var(--tinta-3); font-variant-numeric: tabular-nums;
@@ -128,6 +159,7 @@
     <div id="zona-grafica">
       <div class="grafica" id="grafica"></div>
       <div class="horas" id="horas"></div>
+      <div class="globo" id="globo" role="status" aria-live="polite"></div>
     </div>
     <div class="vacio oculto" id="sin-datos">Todavía no hay datos suficientes de este día.</div>
     <div class="leyenda" id="leyenda">
@@ -231,6 +263,11 @@
     el('sin-datos').classList.toggle('oculto', hayDatos);
     if (!hayDatos) { return; }
 
+    // El globo apunta a una columna concreta; al repintar (cambio de dia o
+    // refresco de datos cada pocos minutos) esas columnas se destruyen y el
+    // globo se quedaba flotando sobre una barra que ya no es la suya.
+    ocultarGlobo();
+
     grafica.innerHTML = '';
     horas.innerHTML = '';
     var esHoy = diaVisible === datos.dia;
@@ -271,9 +308,11 @@
       var reloj = ('0' + h.h).slice(-2) + ':' + ('0' + (h.m || 0)).slice(-2);
       barra.setAttribute('aria-label',
         reloj + ' — ' + (NIVELES[h.n] || NIVELES[0]));
-      barra.title = reloj + ' · ' + (NIVELES[h.n] || NIVELES[0]);
+      // Sin title nativo: el globo da mas informacion y aparece al
+      // instante, mientras que el del navegador tarda un segundo.
 
       col.appendChild(barra);
+      col.dataset.i = i;
       grafica.appendChild(col);
 
       // Solo en hora en punto, y saltando horas si no caben.
@@ -284,6 +323,73 @@
       if (ahora) { etq.className = 'es-ahora'; }
       horas.appendChild(etq);
     });
+
+    // Un solo par de manejadores en el contenedor en vez de uno por barra:
+    // con 178 barras eso son 178 escuchadores que hay que volver a crear en
+    // cada repintado.
+    grafica.onmousemove = function (ev) {
+      var col = ev.target.closest ? ev.target.closest('.col') : null;
+      if (!col || col.dataset.i === undefined) { return; }
+      mostrarGlobo(col, lista[+col.dataset.i], res);
+    };
+    grafica.onmouseleave = ocultarGlobo;
+    // En movil no hay raton: al tocar se muestra igual.
+    grafica.ontouchstart = function (ev) {
+      var t = ev.touches[0];
+      var e2 = document.elementFromPoint(t.clientX, t.clientY);
+      var col = e2 && e2.closest ? e2.closest('.col') : null;
+      if (col && col.dataset.i !== undefined) {
+        mostrarGlobo(col, lista[+col.dataset.i], res);
+      }
+    };
+  }
+
+  var mirada = null;
+
+  function textoGlobo(h, res) {
+    var ini = ('0' + h.h).slice(-2) + ':' + ('0' + (h.m || 0)).slice(-2);
+    var fin = h.h * 60 + (h.m || 0) + (res || 60);
+    var ftxt = ('0' + Math.floor(fin / 60) % 24).slice(-2) + ':' +
+               ('0' + fin % 60).slice(-2);
+    var lineas = ['<b>' + ini + ' – ' + ftxt + '</b>'];
+    lineas.push(NIVELES[h.n] || NIVELES[0]);
+    // "pers" solo viene si se han pedido los numeros; si no, se informa en
+    // relativo, que es lo unico que el panel publica por defecto.
+    if (typeof h.pers === 'number') {
+      var p = h.pers;
+      lineas.push('<span class="gente">' +
+                  (p === 1 ? '1 persona' : p.toFixed(1) + ' personas') +
+                  '</span> de media');
+    } else {
+      lineas.push(h.rel + '% de lo más concurrido');
+    }
+    return lineas.join('<br>');
+  }
+
+  function mostrarGlobo(col, h, res) {
+    var globo = el('globo');
+    if (!globo) { return; }
+    if (mirada && mirada !== col) { mirada.classList.remove('mirada'); }
+    mirada = col;
+    col.classList.add('mirada');
+    globo.innerHTML = textoGlobo(h, res);
+    globo.classList.add('visible');
+
+    // Se coloca sobre la barra y se mantiene dentro de la tarjeta, para que
+    // no se salga por los lados con las franjas de los extremos.
+    var zona = el('zona-grafica');
+    var rz = zona.getBoundingClientRect();
+    var rc = col.getBoundingClientRect();
+    var x = rc.left - rz.left + rc.width / 2 - globo.offsetWidth / 2;
+    x = Math.max(0, Math.min(x, rz.width - globo.offsetWidth));
+    globo.style.left = x + 'px';
+    globo.style.top = Math.max(0, rc.top - rz.top - globo.offsetHeight - 6) + 'px';
+  }
+
+  function ocultarGlobo() {
+    var globo = el('globo');
+    if (globo) { globo.classList.remove('visible'); }
+    if (mirada) { mirada.classList.remove('mirada'); mirada = null; }
   }
 
   function pintarAhora() {
