@@ -45,6 +45,9 @@
   .ahora-txt { font-size: clamp(1.5rem, 6vw, 2.1rem); font-weight: 800;
                line-height: 1.15; letter-spacing: -.4px; }
   .ahora-cmp { color: var(--tinta-2); font-size: .95rem; margin-top: 6px; }
+  .ahora-num { font-size: clamp(1.5rem, 6vw, 2.1rem); font-weight: 800;
+               line-height: 1.15; letter-spacing: -.4px; color: var(--acento);
+               font-variant-numeric: tabular-nums; }
   .etiqueta { font-size: .7rem; font-weight: 700; letter-spacing: 1.4px;
               color: var(--tinta-3); text-transform: uppercase; margin-bottom: 10px; }
 
@@ -114,6 +117,7 @@
     <div class="ahora-linea">
       <span class="bolita" id="ahora-bola"></span>
       <span class="ahora-txt" id="ahora-txt">—</span>
+      <span class="ahora-num" id="ahora-num"></span>
     </div>
     <div class="ahora-cmp" id="ahora-cmp"></div>
   </div>
@@ -126,17 +130,17 @@
       <div class="horas" id="horas"></div>
     </div>
     <div class="vacio oculto" id="sin-datos">Todavía no hay datos suficientes de este día.</div>
-    <div class="leyenda">
-      <span><span class="punto" style="background:var(--n1)"></span>Poca gente</span>
-      <span><span class="punto" style="background:var(--n2)"></span>Gente moderada</span>
-      <span><span class="punto" style="background:var(--n3)"></span>Mucha gente</span>
+    <div class="leyenda" id="leyenda">
+      <span><span class="punto" style="background:var(--n1)"></span><span id="ley-1">Poca gente</span></span>
+      <span><span class="punto" style="background:var(--n2)"></span><span id="ley-2">Gente moderada</span></span>
+      <span><span class="punto" style="background:var(--n3)"></span><span id="ley-3">Mucha gente</span></span>
     </div>
   </div>
 
   <footer>
-    <p>Se actualiza automáticamente cada pocos minutos.</p>
-    <p>Muestra lo concurrida que suele estar la sala comparada consigo misma,
-       no el número de personas.</p>
+    <p id="pie-1">Se actualiza automáticamente cada pocos minutos.</p>
+    <p id="pie-2">Muestra lo concurrida que suele estar la sala comparada
+       consigo misma, no el número de personas.</p>
   </footer>
 </div>
 
@@ -146,6 +150,9 @@
 
   var NOMBRES  = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
   var CORTOS   = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  // Valores por defecto. Se sustituyen por los que traiga el JSON en
+  // aplicarPanel(), asi que cambiar el aspecto del panel no obliga a volver
+  // a subir este fichero: basta con tocarlo en el programa y republicar.
   var NIVELES  = ['Cerrado ahora','Poca gente','Gente moderada','Mucha gente'];
   var COLORES  = ['var(--borde)','var(--n1)','var(--n2)','var(--n3)'];
 
@@ -154,6 +161,47 @@
 
   function el(id) { return document.getElementById(id); }
   function texto(id, t) { var n = el(id); if (n) n.textContent = t; }
+
+  function aplicarPanel(p) {
+    if (!p) { return; }
+
+    // Tema: 'auto' respeta lo que tenga el visitante; claro u oscuro fuerzan.
+    // Se fuerza pisando las variables en :root, que gana sobre la media query
+    // de prefers-color-scheme sin tener que duplicar el CSS.
+    var oscuroSO = window.matchMedia &&
+                   window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var oscuro = p.tema === 'oscuro' || (p.tema !== 'claro' && oscuroSO);
+    var raiz = document.documentElement;
+    if (p.tema === 'claro' || p.tema === 'oscuro') {
+      var pal = oscuro
+        ? {fondo:'#14171c', panel:'#1a1e25', borde:'#262c35',
+           tinta:'#e4e9f0', 'tinta-2':'#9aa5b5', 'tinta-3':'#6b7686'}
+        : {fondo:'#f4f6f9', panel:'#ffffff', borde:'#e2e6ec',
+           tinta:'#1f2733', 'tinta-2':'#5a6472', 'tinta-3':'#8a94a3'};
+      Object.keys(pal).forEach(function (k) {
+        raiz.style.setProperty('--' + k, pal[k]);
+      });
+      if (oscuro) { raiz.style.setProperty('--sombra', 'none'); }
+    }
+
+    if (p.acento) { raiz.style.setProperty('--acento', p.acento); }
+    var tonos = oscuro ? p.tonos_oscuro : p.tonos_claro;
+    if (tonos && tonos.length === 3) {
+      raiz.style.setProperty('--n1', tonos[0]);
+      raiz.style.setProperty('--n2', tonos[1]);
+      raiz.style.setProperty('--n3', tonos[2]);
+      COLORES = ['var(--borde)', tonos[0], tonos[1], tonos[2]];
+    }
+
+    if (p.etiquetas && p.etiquetas.length === 4) {
+      NIVELES = p.etiquetas;
+      texto('ley-1', NIVELES[1]);
+      texto('ley-2', NIVELES[2]);
+      texto('ley-3', NIVELES[3]);
+    }
+    if (p.pie_1) { texto('pie-1', p.pie_1); }
+    if (p.pie_2) { texto('pie-2', p.pie_2); }
+  }
 
   function pintarSelector() {
     var cont = el('dias');
@@ -228,16 +276,37 @@
     };
     texto('ahora-cmp', a.cmp === null || a.cmp === undefined
       ? '' : (frases[String(a.cmp)] || ''));
+
+    // El numero solo se pinta si viene en el JSON. No se decide aqui: si no
+    // se ha pedido publicarlo, el campo no existe y no hay nada que ocultar.
+    var p = datos.panel || {};
+    if (p.mostrar_numeros && typeof datos.aforo === 'number') {
+      texto('ahora-num', datos.aforo + (datos.aforo === 1 ? ' persona' : ' personas'));
+    } else {
+      texto('ahora-num', '');
+    }
   }
 
   function pintar() {
-    texto('titulo', datos.sala || 'Aforo de la sala');
+    aplicarPanel(datos.panel);
+    var p = datos.panel || {};
+    texto('titulo', p.titulo || datos.sala || 'Aforo de la sala');
+    document.title = (p.titulo || datos.sala || 'Aforo') + ' · Fluxus';
 
     var gen = datos.generado ? new Date(datos.generado) : null;
-    texto('subtitulo', gen
-      ? NOMBRES[datos.dia] + ' · actualizado a las ' +
-        gen.toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'})
-      : '');
+    var conSeg = (datos.panel || {}).mostrar_segundos;
+    var fmtHora = conSeg
+      ? {hour: '2-digit', minute: '2-digit', second: '2-digit'}
+      : {hour: '2-digit', minute: '2-digit'};
+    var sub = '';
+    if (gen) {
+      sub = NOMBRES[datos.dia] + ' · actualizado a las ' +
+            gen.toLocaleTimeString('es-ES', fmtHora);
+      if (conSeg && datos.ultimo_paso) {
+        sub += ' · último paso ' + datos.ultimo_paso;
+      }
+    }
+    texto('subtitulo', sub);
 
     // Si el fichero lleva mucho sin renovarse, el equipo puede estar apagado
     // o sin conexion: mas vale decirlo que mostrar algo viejo como si fuera
