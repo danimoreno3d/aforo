@@ -1,4 +1,9 @@
 <!doctype html>
+<!-- fluxus-pagina: 4 -->
+<!-- Sube el numero al cambiar esta pagina en el programa: el equipo
+     solo sustituye la publicada si la suya es mas nueva. Si editas
+     esto a mano en GitHub, deja el numero como esta y no te lo
+     pisara. -->
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -45,6 +50,9 @@
   .ahora-txt { font-size: clamp(1.5rem, 6vw, 2.1rem); font-weight: 800;
                line-height: 1.15; letter-spacing: -.4px; }
   .ahora-cmp { color: var(--tinta-2); font-size: .95rem; margin-top: 6px; }
+  .ahora-num { font-size: clamp(1.5rem, 6vw, 2.1rem); font-weight: 800;
+               line-height: 1.15; letter-spacing: -.4px; color: var(--acento);
+               font-variant-numeric: tabular-nums; }
   .etiqueta { font-size: .7rem; font-weight: 700; letter-spacing: 1.4px;
               color: var(--tinta-3); text-transform: uppercase; margin-bottom: 10px; }
 
@@ -65,8 +73,8 @@
   }
 
   /* --- grafica de barras --- */
-  .grafica { display: flex; align-items: flex-end; gap: 3px; height: 160px;
-             margin-bottom: 4px; }
+  .grafica { display: flex; align-items: flex-end; gap: var(--hueco, 3px);
+             height: 160px; margin-bottom: 4px; }
   .col { flex: 1 1 0; display: flex; flex-direction: column;
          justify-content: flex-end; height: 100%; min-width: 0; }
   .barra { border-radius: 4px 4px 2px 2px; width: 100%;
@@ -76,10 +84,36 @@
   @media (prefers-color-scheme: dark) {
     .col.es-ahora { background: rgba(224,137,74,.16); }
   }
-  .horas { display: flex; gap: 3px; }
+  .col { cursor: default; }
+  /* Resaltado: se aclara la barra y se marca la columna, para que se vea
+     cual se esta consultando incluso con barras de 4 px. */
+  /* Tiene que distinguirse de .es-ahora, que marca la hora actual en
+     naranja: el resaltado usa el color de acento y un contorno claro en la
+     barra, porque un fondo tenue no se ve sobre una barra alta y brillante. */
+  .col.mirada { background: color-mix(in srgb, var(--acento) 30%, transparent);
+                border-radius: 5px; }
+  .col.mirada .barra { filter: brightness(1.25) saturate(1.15);
+                       box-shadow: inset 0 0 0 2px var(--tinta); }
+  @supports not (background: color-mix(in srgb, red 10%, transparent)) {
+    .col.mirada { background: rgba(128, 128, 128, .34); }
+  }
+
+  .globo {
+    position: absolute; z-index: 5; pointer-events: none;
+    background: var(--tinta); color: var(--fondo);
+    border-radius: 9px; padding: 8px 11px; font-size: .78rem;
+    line-height: 1.45; white-space: nowrap; opacity: 0;
+    transition: opacity .12s; box-shadow: 0 4px 14px rgba(0,0,0,.28);
+  }
+  .globo.visible { opacity: 1; }
+  .globo b { font-size: .9rem; }
+  .globo .gente { color: var(--acento); font-weight: 700; }
+  #zona-grafica { position: relative; }
+
+  .horas { display: flex; gap: var(--hueco, 3px); }
   .horas span { flex: 1 1 0; text-align: center; font-size: .68rem;
                 color: var(--tinta-3); font-variant-numeric: tabular-nums;
-                min-width: 0; overflow: hidden; }
+                min-width: 0; overflow: visible; white-space: nowrap; }
   .horas span.es-ahora { color: var(--ahora); font-weight: 700; }
 
   .leyenda { display: flex; gap: 16px; flex-wrap: wrap; font-size: .82rem;
@@ -114,6 +148,7 @@
     <div class="ahora-linea">
       <span class="bolita" id="ahora-bola"></span>
       <span class="ahora-txt" id="ahora-txt">—</span>
+      <span class="ahora-num" id="ahora-num"></span>
     </div>
     <div class="ahora-cmp" id="ahora-cmp"></div>
   </div>
@@ -124,19 +159,20 @@
     <div id="zona-grafica">
       <div class="grafica" id="grafica"></div>
       <div class="horas" id="horas"></div>
+      <div class="globo" id="globo" role="status" aria-live="polite"></div>
     </div>
     <div class="vacio oculto" id="sin-datos">Todavía no hay datos suficientes de este día.</div>
-    <div class="leyenda">
-      <span><span class="punto" style="background:var(--n1)"></span>Poca gente</span>
-      <span><span class="punto" style="background:var(--n2)"></span>Gente moderada</span>
-      <span><span class="punto" style="background:var(--n3)"></span>Mucha gente</span>
+    <div class="leyenda" id="leyenda">
+      <span><span class="punto" style="background:var(--n1)"></span><span id="ley-1">Poca gente</span></span>
+      <span><span class="punto" style="background:var(--n2)"></span><span id="ley-2">Gente moderada</span></span>
+      <span><span class="punto" style="background:var(--n3)"></span><span id="ley-3">Mucha gente</span></span>
     </div>
   </div>
 
   <footer>
-    <p>Se actualiza automáticamente cada pocos minutos.</p>
-    <p>Muestra lo concurrida que suele estar la sala comparada consigo misma,
-       no el número de personas.</p>
+    <p id="pie-1">Se actualiza automáticamente cada pocos minutos.</p>
+    <p id="pie-2">Muestra lo concurrida que suele estar la sala comparada
+       consigo misma, no el número de personas.</p>
   </footer>
 </div>
 
@@ -146,6 +182,9 @@
 
   var NOMBRES  = ['Lunes','Martes','Miércoles','Jueves','Viernes','Sábado','Domingo'];
   var CORTOS   = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+  // Valores por defecto. Se sustituyen por los que traiga el JSON en
+  // aplicarPanel(), asi que cambiar el aspecto del panel no obliga a volver
+  // a subir este fichero: basta con tocarlo en el programa y republicar.
   var NIVELES  = ['Cerrado ahora','Poca gente','Gente moderada','Mucha gente'];
   var COLORES  = ['var(--borde)','var(--n1)','var(--n2)','var(--n3)'];
 
@@ -154,6 +193,58 @@
 
   function el(id) { return document.getElementById(id); }
   function texto(id, t) { var n = el(id); if (n) n.textContent = t; }
+
+  function aplicarPanel(p) {
+    if (!p) { return; }
+
+    // Tema: 'auto' respeta lo que tenga el visitante; claro u oscuro fuerzan.
+    // Se fuerza pisando las variables en :root, que gana sobre la media query
+    // de prefers-color-scheme sin tener que duplicar el CSS.
+    var oscuroSO = window.matchMedia &&
+                   window.matchMedia('(prefers-color-scheme: dark)').matches;
+    var oscuro = p.tema === 'oscuro' || (p.tema !== 'claro' && oscuroSO);
+    var raiz = document.documentElement;
+    if (p.tema === 'claro' || p.tema === 'oscuro') {
+      var pal = oscuro
+        ? {fondo:'#14171c', panel:'#1a1e25', borde:'#262c35',
+           tinta:'#e4e9f0', 'tinta-2':'#9aa5b5', 'tinta-3':'#6b7686'}
+        : {fondo:'#f4f6f9', panel:'#ffffff', borde:'#e2e6ec',
+           tinta:'#1f2733', 'tinta-2':'#5a6472', 'tinta-3':'#8a94a3'};
+      Object.keys(pal).forEach(function (k) {
+        raiz.style.setProperty('--' + k, pal[k]);
+      });
+      if (oscuro) { raiz.style.setProperty('--sombra', 'none'); }
+    }
+
+    if (p.acento) { raiz.style.setProperty('--acento', p.acento); }
+    var tonos = oscuro ? p.tonos_oscuro : p.tonos_claro;
+    if (tonos && tonos.length === 3) {
+      raiz.style.setProperty('--n1', tonos[0]);
+      raiz.style.setProperty('--n2', tonos[1]);
+      raiz.style.setProperty('--n3', tonos[2]);
+      COLORES = ['var(--borde)', tonos[0], tonos[1], tonos[2]];
+    }
+
+    if (p.etiquetas && p.etiquetas.length === 4) {
+      NIVELES = p.etiquetas;
+      texto('ley-1', NIVELES[1]);
+      texto('ley-2', NIVELES[2]);
+      texto('ley-3', NIVELES[3]);
+    }
+    if (p.pie_1) { texto('pie-1', p.pie_1); }
+    if (p.pie_2) { texto('pie-2', p.pie_2); }
+  }
+
+  // Cuantos minutos sin renovarse hacen que los datos dejen de valer.
+  // 45 min es holgado: la publicacion va cada 5, asi que hacen falta nueve
+  // ciclos seguidos fallando para que salte por error.
+  var MINUTOS_VIEJO = 45;
+
+  function datosViejos() {
+    var g = datos && datos.generado ? new Date(datos.generado) : null;
+    if (!g || isNaN(g.getTime())) { return false; }
+    return (Date.now() - g.getTime()) > MINUTOS_VIEJO * 60 * 1000;
+  }
 
   function pintarSelector() {
     var cont = el('dias');
@@ -183,12 +274,37 @@
     el('sin-datos').classList.toggle('oculto', hayDatos);
     if (!hayDatos) { return; }
 
+    // El globo apunta a una columna concreta; al repintar (cambio de dia o
+    // refresco de datos cada pocos minutos) esas columnas se destruyen y el
+    // globo se quedaba flotando sobre una barra que ya no es la suya.
+    ocultarGlobo();
+
     grafica.innerHTML = '';
     horas.innerHTML = '';
     var esHoy = diaVisible === datos.dia;
 
+    // El hueco entre barras se estrecha cuando hay muchas: con franjas de 5
+    // minutos son casi 180 barras y 3px de separacion se comerian el ancho.
+    var hueco = lista.length > 120 ? '1px' : (lista.length > 60 ? '2px' : '3px');
+    document.documentElement.style.setProperty('--hueco', hueco);
+
+    // La franja "de ahora" ya no es la hora en punto: hay que comparar hora
+    // y minuto contra el tamano de franja que traiga el JSON.
+    var res = datos.resolucion_min || 60;
+    var minAhora = Math.floor((datos.hora * 60 + (datos.minuto || 0)) / res) * res;
+
+    // Con muchas barras no caben todas las etiquetas. Se rotula solo en hora
+    // en punto, y si aun asi no caben, cada 2 o 3 horas.
+    var porHora = Math.max(1, Math.round(60 / res));
+    var horasVisibles = Math.ceil(lista.length / porHora);
+    var anchoUtil = grafica.clientWidth || 700;
+    var cadaCuantas = 1;
+    if (horasVisibles * 22 > anchoUtil) { cadaCuantas = 2; }
+    if (horasVisibles * 14 > anchoUtil) { cadaCuantas = 3; }
+
     lista.forEach(function (h, i) {
-      var ahora = esHoy && h.h === datos.hora;
+      var min = h.h * 60 + (h.m || 0);
+      var ahora = esHoy && min === minAhora;
 
       var col = document.createElement('div');
       col.className = 'col' + (ahora ? ' es-ahora' : '');
@@ -200,24 +316,123 @@
       barra.style.height = Math.max(3, h.rel) + '%';
       barra.style.background = COLORES[h.n] || COLORES[0];
       barra.setAttribute('role', 'img');
+      var reloj = ('0' + h.h).slice(-2) + ':' + ('0' + (h.m || 0)).slice(-2);
       barra.setAttribute('aria-label',
-        h.h + ':00 — ' + (NIVELES[h.n] || NIVELES[0]));
-      barra.title = h.h + ':00 · ' + (NIVELES[h.n] || NIVELES[0]);
+        reloj + ' — ' + (NIVELES[h.n] || NIVELES[0]));
+      // Sin title nativo: el globo da mas informacion y aparece al
+      // instante, mientras que el del navegador tarda un segundo.
 
       col.appendChild(barra);
+      col.dataset.i = i;
       grafica.appendChild(col);
 
-      // En pantallas estrechas, una etiqueta de cada dos para que no se pisen.
+      // Solo en hora en punto, y saltando horas si no caben.
       var etq = document.createElement('span');
-      var salta = lista.length > 9 && window.innerWidth < 520 && (i % 2);
-      etq.textContent = salta ? '' : h.h;
+      var enPunto = (h.m || 0) === 0;
+      var rotula = enPunto && (h.h % cadaCuantas === 0);
+      etq.textContent = rotula ? h.h : '';
       if (ahora) { etq.className = 'es-ahora'; }
       horas.appendChild(etq);
     });
+
+    // Un solo par de manejadores en el contenedor en vez de uno por barra:
+    // con 178 barras eso son 178 escuchadores que hay que volver a crear en
+    // cada repintado.
+    grafica.onmousemove = function (ev) {
+      var col = ev.target.closest ? ev.target.closest('.col') : null;
+      if (!col || col.dataset.i === undefined) { return; }
+      mostrarGlobo(col, lista[+col.dataset.i], res);
+    };
+    grafica.onmouseleave = ocultarGlobo;
+    // En movil no hay raton: al tocar se muestra igual.
+    grafica.ontouchstart = function (ev) {
+      var t = ev.touches[0];
+      var e2 = document.elementFromPoint(t.clientX, t.clientY);
+      var col = e2 && e2.closest ? e2.closest('.col') : null;
+      if (col && col.dataset.i !== undefined) {
+        mostrarGlobo(col, lista[+col.dataset.i], res);
+      }
+    };
+  }
+
+  var mirada = null;
+
+  function textoGlobo(h, res) {
+    var ini = ('0' + h.h).slice(-2) + ':' + ('0' + (h.m || 0)).slice(-2);
+    var fin = h.h * 60 + (h.m || 0) + (res || 60);
+    var ftxt = ('0' + Math.floor(fin / 60) % 24).slice(-2) + ':' +
+               ('0' + fin % 60).slice(-2);
+    var lineas = ['<b>' + ini + ' – ' + ftxt + '</b>'];
+    lineas.push(NIVELES[h.n] || NIVELES[0]);
+    // "pers" solo viene si se han pedido los numeros; si no, se informa en
+    // relativo, que es lo unico que el panel publica por defecto.
+    if (typeof h.pers === 'number') {
+      var p = h.pers;
+      lineas.push('<span class="gente">' +
+                  (p === 1 ? '1 persona' : p.toFixed(1) + ' personas') +
+                  '</span> de media');
+    } else {
+      lineas.push(h.rel + '% de lo más concurrido');
+    }
+    return lineas.join('<br>');
+  }
+
+  function mostrarGlobo(col, h, res) {
+    var globo = el('globo');
+    if (!globo) { return; }
+    if (mirada && mirada !== col) { mirada.classList.remove('mirada'); }
+    mirada = col;
+    col.classList.add('mirada');
+    globo.innerHTML = textoGlobo(h, res);
+    globo.classList.add('visible');
+
+    // Se coloca sobre la barra y se mantiene dentro de la tarjeta, para que
+    // no se salga por los lados con las franjas de los extremos.
+    var zona = el('zona-grafica');
+    var rz = zona.getBoundingClientRect();
+    var rc = col.getBoundingClientRect();
+    var x = rc.left - rz.left + rc.width / 2 - globo.offsetWidth / 2;
+    x = Math.max(0, Math.min(x, rz.width - globo.offsetWidth));
+    globo.style.left = x + 'px';
+    globo.style.top = Math.max(0, rc.top - rz.top - globo.offsetHeight - 6) + 'px';
+  }
+
+  function ocultarGlobo() {
+    var globo = el('globo');
+    if (globo) { globo.classList.remove('visible'); }
+    if (mirada) { mirada.classList.remove('mirada'); mirada = null; }
   }
 
   function pintarAhora() {
     var a = datos.ahora || {n: 0, rel: 0, cmp: null};
+
+    // Si los datos estan viejos, el nivel NO se pinta.
+    //
+    // Con el equipo apagado o suspendido, el fichero se queda congelado con
+    // el nivel de la ultima publicacion. Y el 0 ("Cerrado ahora") nunca
+    // aparece ahi, porque el nivel minimo que se publica es 1 a proposito.
+    // Resultado: a las tres de la madrugada el panel ensenaba "Poca gente" y,
+    // con los numeros activados, "N personas", como si la sala estuviera
+    // abierta. El aviso de abajo ya decia que los datos eran viejos, pero la
+    // banda de color es lo primero que se mira y contaba otra cosa.
+    //
+    // Esto se decide AQUI, en la pagina, y no al publicar: cuando el equipo
+    // esta apagado no hay nadie que publique nada, que es justo cuando hace
+    // falta.
+    // Tambien cuando el equipo dice que hay algo que revisar. Parece de
+    // mas, pero no lo es: si la camara esta caida, el JSON se sigue
+    // publicando con la hora fresca y el numero CONGELADO, asi que los
+    // datos parecen de ahora y no lo son. Decir "no disponibles" y a la
+    // vez pintar "Movido, 4 personas" seria contradecirse en la misma
+    // pantalla.
+    if (datosViejos() || datos.estado === 'revisar') {
+      texto('ahora-txt', NIVELES[0] || 'Cerrado ahora');
+      el('ahora-bola').style.background = COLORES[0] || '#888';
+      texto('ahora-cmp', '');
+      texto('ahora-num', '');
+      return;
+    }
+
     texto('ahora-txt', NIVELES[a.n] || NIVELES[0]);
     el('ahora-bola').style.background = COLORES[a.n] || COLORES[0];
 
@@ -228,23 +443,53 @@
     };
     texto('ahora-cmp', a.cmp === null || a.cmp === undefined
       ? '' : (frases[String(a.cmp)] || ''));
+
+    // El numero solo se pinta si viene en el JSON. No se decide aqui: si no
+    // se ha pedido publicarlo, el campo no existe y no hay nada que ocultar.
+    var p = datos.panel || {};
+    if (p.mostrar_numeros && typeof datos.aforo === 'number') {
+      texto('ahora-num', datos.aforo + (datos.aforo === 1 ? ' persona' : ' personas'));
+    } else {
+      texto('ahora-num', '');
+    }
   }
 
   function pintar() {
-    texto('titulo', datos.sala || 'Aforo de la sala');
+    aplicarPanel(datos.panel);
+    var p = datos.panel || {};
+    texto('titulo', p.titulo || datos.sala || 'Aforo de la sala');
+    document.title = (p.titulo || datos.sala || 'Aforo') + ' · Fluxus';
 
     var gen = datos.generado ? new Date(datos.generado) : null;
-    texto('subtitulo', gen
-      ? NOMBRES[datos.dia] + ' · actualizado a las ' +
-        gen.toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'})
-      : '');
+    var conSeg = (datos.panel || {}).mostrar_segundos;
+    var fmtHora = conSeg
+      ? {hour: '2-digit', minute: '2-digit', second: '2-digit'}
+      : {hour: '2-digit', minute: '2-digit'};
+    var sub = '';
+    if (gen) {
+      sub = NOMBRES[datos.dia] + ' · actualizado a las ' +
+            gen.toLocaleTimeString('es-ES', fmtHora);
+      if (conSeg && datos.ultimo_paso) {
+        sub += ' · último paso ' + datos.ultimo_paso;
+      }
+    }
+    texto('subtitulo', sub);
 
     // Si el fichero lleva mucho sin renovarse, el equipo puede estar apagado
     // o sin conexion: mas vale decirlo que mostrar algo viejo como si fuera
     // de ahora mismo.
+    // El aviso cubre dos cosas distintas con el mismo sitio: que los datos
+    // esten viejos (equipo apagado o sin conexion) y que el propio equipo
+    // diga que hay algo que revisar. Lo segundo llega como un unico campo
+    // "revisar", sin detalle: lo que la pagina puede decir es que el dato no
+    // vale ahora mismo, no por que. El motivo esta en el informe privado.
     var aviso = el('aviso');
-    var viejo = gen && (Date.now() - gen.getTime()) > 45 * 60 * 1000;
-    aviso.classList.toggle('oculto', !viejo);
+    var revisar = datos.estado === 'revisar';
+    var viejo = datosViejos();
+    aviso.classList.toggle('oculto', !viejo && !revisar);
+    if (!viejo && revisar) {
+      aviso.textContent = 'Datos no disponibles ahora mismo.';
+    }
     if (viejo) {
       aviso.textContent = 'Estos datos no se actualizan desde las ' +
         gen.toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'}) +
