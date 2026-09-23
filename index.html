@@ -1,9 +1,10 @@
 <!doctype html>
-<!-- fluxus-pagina: 4 -->
+<!-- fluxus-pagina: 6 huella: babc31297d29 -->
 <!-- Sube el numero al cambiar esta pagina en el programa: el equipo
      solo sustituye la publicada si la suya es mas nueva. Si editas
      esto a mano en GitHub, deja el numero como esta y no te lo
-     pisara. -->
+     pisara. La huella es del resto del fichero: si cambias la pagina
+     sin subir el numero, el autotest lo detecta y te dice la nueva. -->
 <html lang="es">
 <head>
 <meta charset="utf-8">
@@ -110,6 +111,9 @@
   .globo .gente { color: var(--acento); font-weight: 700; }
   #zona-grafica { position: relative; }
 
+  /* Barra con uno o dos dias de datos: se ve, pero se ve que es floja. */
+  .barra.pocos { opacity: .45; }
+  .rango-semana { font-size: .78rem; opacity: .7; margin: -2px 0 8px; }
   .horas { display: flex; gap: var(--hueco, 3px); }
   .horas span { flex: 1 1 0; text-align: center; font-size: .68rem;
                 color: var(--tinta-3); font-variant-numeric: tabular-nums;
@@ -154,7 +158,8 @@
   </div>
 
   <div class="tarjeta">
-    <div class="etiqueta">Horas con más gente</div>
+    <div class="etiqueta" id="titulo-grafica">Horas con más gente</div>
+    <div class="rango-semana oculto" id="rango-semana"></div>
     <div class="dias" id="dias" role="group" aria-label="Día de la semana"></div>
     <div id="zona-grafica">
       <div class="grafica" id="grafica"></div>
@@ -240,10 +245,139 @@
   // ciclos seguidos fallando para que salte por error.
   var MINUTOS_VIEJO = 45;
 
+  // El propio fichero dice si el aforo publicado es de ahora o no: lo
+  // calcula quien lo genera, que es el unico que sabe cuando fue el ultimo
+  // paso por la puerta. La cuenta de los 45 minutos se mantiene como red de
+  // seguridad para ficheros generados por una version anterior.
+  function aforoCaducado() {
+    return datos && datos.caducado === true;
+  }
+
   function datosViejos() {
     var g = datos && datos.generado ? new Date(datos.generado) : null;
     if (!g || isNaN(g.getTime())) { return false; }
     return (Date.now() - g.getTime()) > MINUTOS_VIEJO * 60 * 1000;
+  }
+
+  // ------------------------------------------------------------------
+  // EL HORARIO DEL TALLER
+  //
+  // Fuera del horario el equipo duerme a proposito (noches y dias que no
+  // abre), asi que el aforo.json que hay es el del ultimo cierre. Sin esto la
+  // pagina lo veia viejo y decia "No disponible, puede que el equipo este
+  // apagado" todo el fin de semana. Con el horario dentro del JSON, la
+  // pagina sabe que esta cerrado y lo dice, sin depender de que nadie
+  // publique.
+
+  function sumarDias(iso, n) {
+    var d = new Date(iso + 'T12:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function aMinutos(hhmm) {
+    var p = String(hhmm || '').split(':');
+    return parseInt(p[0], 10) * 60 + parseInt(p[1] || '0', 10);
+  }
+
+  // La hora de la SALA, no la de quien mira: el desfase va en "generado"
+  // (por ejemplo +02:00). Sin el, la del navegador.
+  function relojSala() {
+    var ahora = new Date();
+    var m = datos && datos.generado
+      ? /([+-])(\d\d):(\d\d)$/.exec(datos.generado) : null;
+    var desfase = m
+      ? (m[1] === '-' ? -1 : 1) * (parseInt(m[2], 10) * 60 + parseInt(m[3], 10))
+      : -ahora.getTimezoneOffset();
+    var sala = new Date(ahora.getTime() + desfase * 60000);
+    var min = sala.getUTCHours() * 60 + sala.getUTCMinutes();
+    var wd = (sala.getUTCDay() + 6) % 7;
+    var fecha = sala.toISOString().slice(0, 10);
+    // La fecha de la JORNADA: antes del corte (las 05:00) aun es la de ayer.
+    var corte = ((datos && datos.horario && datos.horario.corte) || 5) * 60;
+    var antes = min < corte;
+    return {min: min, wd: wd,
+            fechaOp: antes ? sumarDias(fecha, -1) : fecha,
+            wdOp: antes ? (wd + 6) % 7 : wd};
+  }
+
+  // true abierto, false cerrado por horario, null si no hay horario.
+  function abiertoPorHorario() {
+    var h = datos && datos.horario;
+    if (!h || !h.dias || !h.inicio || !h.fin) { return null; }
+    var ini = aMinutos(h.inicio), fin = aMinutos(h.fin);
+    if (isNaN(ini) || isNaN(fin) || ini === fin) { return null; }
+    var r = relojSala();
+    var abre = function (d) { return h.dias.indexOf(d) >= 0; };
+    if (ini < fin) { return abre(r.wd) && r.min >= ini && r.min < fin; }
+    // Turno de noche: es del dia en que empieza.
+    if (r.min >= ini) { return abre(r.wd); }
+    if (r.min < fin) { return abre((r.wd + 6) % 7); }
+    return false;
+  }
+
+  // "Abre mañana a las 08:50." Para que "Cerrado" diga tambien cuando no.
+  function proximaApertura() {
+    var h = datos && datos.horario;
+    if (!h || !h.dias || !h.dias.length) { return ''; }
+    var r = relojSala(), ini = aMinutos(h.inicio);
+    var dias = ['el lunes', 'el martes', 'el miércoles', 'el jueves',
+                'el viernes', 'el sábado', 'el domingo'];
+    for (var k = 0; k < 8; k++) {
+      var d = (r.wd + k) % 7;
+      if (h.dias.indexOf(d) < 0 || (k === 0 && r.min >= ini)) { continue; }
+      var cuando = k === 0 ? 'hoy' : (k === 1 ? 'mañana' : dias[d]);
+      return 'Abre ' + cuando + ' a las ' + h.inicio + '.';
+    }
+    return '';
+  }
+
+  function minutosDesdeApertura() {
+    var h = datos && datos.horario;
+    if (!h || !h.inicio) { return null; }
+    var d = relojSala().min - aMinutos(h.inicio);
+    return d < 0 ? d + 1440 : d;
+  }
+
+  // EL LUNES EMPIEZA DE CERO AUNQUE EL EQUIPO DUERMA.
+  //
+  // La grafica de la semana la monta el equipo al publicar. El lunes a las
+  // 07:00 el equipo aun duerme y el fichero es el del viernes: sin esto la
+  // pagina ensenaba la semana pasada hasta la primera publicacion. Y el
+  // sabado, "hoy" seria el viernes del fichero. Se ajusta con el reloj de la
+  // sala: semana nueva vacia si ya ha pasado, y hoy, futuros y cerrados al dia.
+  function ajustarSemana() {
+    if (datos.grafica !== 'semana' || !datos.semana_desde ||
+        !datos.semana_hasta || !datos.semana) { return; }
+    var r = relojSala();
+    if (r.fechaOp < datos.semana_desde) { return; }
+    if (r.fechaOp > datos.semana_hasta) {
+      var lunes = sumarDias(r.fechaOp, -r.wdOp);
+      datos.semana = NOMBRES.map(function (n, i) {
+        return {dia: n, fecha: sumarDias(lunes, i), horas: []};
+      });
+      datos.semana_desde = lunes;
+      datos.semana_hasta = sumarDias(lunes, 6);
+    }
+    var dias = datos.horario && datos.horario.dias;
+    datos.semana.forEach(function (d, i) {
+      var f = d.fecha || sumarDias(datos.semana_desde, i);
+      d.futuro = f > r.fechaOp;
+      if (dias) { d.cerrado = dias.indexOf(i) < 0; }
+    });
+    datos.dia = r.wdOp;
+  }
+
+  // El dia que se ensena al entrar: hoy, salvo que hoy no abra y no tenga
+  // nada (un sabado): entonces el ultimo dia de la semana con datos.
+  function diaInicial() {
+    var hoy = datos.semana && datos.semana[datos.dia];
+    if (hoy && hoy.cerrado && !(hoy.horas || []).length) {
+      for (var i = datos.dia - 1; i >= 0; i--) {
+        if ((datos.semana[i].horas || []).length) { return i; }
+      }
+    }
+    return datos.dia;
   }
 
   function pintarSelector() {
@@ -269,10 +403,38 @@
     var dia = (datos.semana || [])[diaVisible];
     var lista = (dia && dia.horas) || [];
 
+    // Modo "semana": la grafica es lo que ha pasado ESTA semana, y empieza
+    // de cero cada lunes. Se dice en el titulo y con las fechas, para que
+    // nadie la lea como "lo que suele pasar".
+    var enSemana = datos.grafica === 'semana';
+    texto('titulo-grafica', enSemana ? 'Esta semana' : 'Horas con más gente');
+    var rango = el('rango-semana');
+    if (enSemana && datos.semana_desde && datos.semana_hasta) {
+      var d1 = new Date(datos.semana_desde + 'T12:00:00');
+      var d2 = new Date(datos.semana_hasta + 'T12:00:00');
+      var fmt = {day: 'numeric', month: 'long'};
+      rango.textContent = 'Del ' + d1.toLocaleDateString('es-ES', fmt) +
+        ' al ' + d2.toLocaleDateString('es-ES', fmt);
+      rango.classList.remove('oculto');
+    } else {
+      rango.classList.add('oculto');
+    }
+
     var hayDatos = lista.length > 0;
     el('zona-grafica').classList.toggle('oculto', !hayDatos);
     el('sin-datos').classList.toggle('oculto', hayDatos);
-    if (!hayDatos) { return; }
+    if (!hayDatos) {
+      var vacio = 'Todavía no hay datos suficientes de este día.';
+      if (dia && dia.cerrado) {
+        vacio = 'El taller no abre este día.';
+      } else if (enSemana) {
+        vacio = (dia && dia.futuro) ? 'Este día todavía no ha llegado.'
+              : (diaVisible === datos.dia ? 'Todavía no hay datos de hoy.'
+              : 'Ese día no hubo datos.');
+      }
+      texto('sin-datos', vacio);
+      return;
+    }
 
     // El globo apunta a una columna concreta; al repintar (cambio de dia o
     // refresco de datos cada pocos minutos) esas columnas se destruyen y el
@@ -310,7 +472,11 @@
       col.className = 'col' + (ahora ? ' es-ahora' : '');
 
       var barra = document.createElement('div');
-      barra.className = 'barra';
+      // Poco apoyo: la barra sale de uno o dos dias, no de "lo que suele
+      // pasar". Se dibuja mas floja para no afirmar lo que no se sabe, pero
+      // se dibuja: antes estas franjas se quitaban y desaparecian dias
+      // enteros de la grafica.
+      barra.className = 'barra' + (h.pocos ? ' pocos' : '');
       // Un minimo visible: una hora abierta pero tranquila no debe
       // confundirse con una hora en la que la sala esta cerrada.
       barra.style.height = Math.max(3, h.rel) + '%';
@@ -318,7 +484,9 @@
       barra.setAttribute('role', 'img');
       var reloj = ('0' + h.h).slice(-2) + ':' + ('0' + (h.m || 0)).slice(-2);
       barra.setAttribute('aria-label',
-        reloj + ' — ' + (NIVELES[h.n] || NIVELES[0]));
+        reloj + ' — ' + (NIVELES[h.n] || NIVELES[0])
+        + (h.pocos ? ' (solo ' + h.pocos + ' día'
+           + (h.pocos === 1 ? '' : 's') + ' de datos)' : ''));
       // Sin title nativo: el globo da mas informacion y aparece al
       // instante, mientras que el del navegador tarda un segundo.
 
@@ -406,6 +574,18 @@
   function pintarAhora() {
     var a = datos.ahora || {n: 0, rel: 0, cmp: null};
 
+    // Fuera del horario manda el horario: "Cerrado", y cuando vuelve a abrir.
+    // Va antes que todo lo demas porque a esas horas el fichero es viejo A
+    // PROPOSITO (el equipo duerme) y eso no es ninguna averia. Tampoco se
+    // pinta el numero: seria el del cierre, no el de ahora.
+    if (abiertoPorHorario() === false) {
+      texto('ahora-txt', NIVELES[0]);
+      el('ahora-bola').style.background = COLORES[0];
+      texto('ahora-cmp', proximaApertura());
+      texto('ahora-num', '');
+      return;
+    }
+
     // Si los datos estan viejos, el nivel NO se pinta.
     //
     // Con el equipo apagado o suspendido, el fichero se queda congelado con
@@ -425,9 +605,14 @@
     // datos parecen de ahora y no lo son. Decir "no disponibles" y a la
     // vez pintar "Movido, 4 personas" seria contradecirse en la misma
     // pantalla.
-    if (datosViejos() || datos.estado === 'revisar') {
-      texto('ahora-txt', NIVELES[0] || 'Cerrado ahora');
-      el('ahora-bola').style.background = COLORES[0] || '#888';
+    if (datosViejos() || aforoCaducado() || datos.estado === 'revisar') {
+      // NO se dice "Cerrado": se dice que no se sabe. Con las etiquetas
+      // puestas en este taller, NIVELES[0] es "Cerrado", asi que un equipo
+      // apagado o sin publicar hacia que la pagina afirmara que la sala esta
+      // cerrada cuando en realidad no tiene ni idea. El aviso de debajo
+      // explica el motivo.
+      texto('ahora-txt', 'No disponible');
+      el('ahora-bola').style.background = '#8a94a3';
       texto('ahora-cmp', '');
       texto('ahora-num', '');
       return;
@@ -467,7 +652,10 @@
       : {hour: '2-digit', minute: '2-digit'};
     var sub = '';
     if (gen) {
-      sub = NOMBRES[datos.dia] + ' · actualizado a las ' +
+      // El dia del reloj, no el de la jornada (datos.dia): a las 01:00 del
+      // martes la jornada aun es la del lunes, pero "Lunes · actualizado a
+      // las 01:00" se leeria como un dato de hace un dia.
+      sub = NOMBRES[(gen.getDay() + 6) % 7] + ' · actualizado a las ' +
             gen.toLocaleTimeString('es-ES', fmtHora);
       if (conSeg && datos.ultimo_paso) {
         sub += ' · último paso ' + datos.ultimo_paso;
@@ -484,19 +672,50 @@
     // "revisar", sin detalle: lo que la pagina puede decir es que el dato no
     // vale ahora mismo, no por que. El motivo esta en el informe privado.
     var aviso = el('aviso');
-    var revisar = datos.estado === 'revisar';
-    var viejo = datosViejos();
+    // Cerrado por horario: ni "datos viejos" ni "revisar". El equipo duerme
+    // porque toca, y decir "puede que este apagado" seria dar una alarma
+    // cada noche y cada fin de semana.
+    var cerrado = abiertoPorHorario() === false;
+    var revisar = !cerrado && datos.estado === 'revisar';
+    var viejo = !cerrado && (datosViejos() || aforoCaducado());
+    // Recien abierto, el equipo aun se esta despertando: la primera
+    // publicacion llega a los pocos minutos.
+    var arrancando = viejo && abiertoPorHorario() === true &&
+                     minutosDesdeApertura() < 20;
     aviso.classList.toggle('oculto', !viejo && !revisar);
     if (!viejo && revisar) {
       aviso.textContent = 'Datos no disponibles ahora mismo.';
     }
-    if (viejo) {
-      aviso.textContent = 'Estos datos no se actualizan desde las ' +
-        gen.toLocaleTimeString('es-ES', {hour: '2-digit', minute: '2-digit'}) +
-        '. Puede que el equipo esté apagado.';
+    if (arrancando) {
+      aviso.textContent = 'El equipo se está poniendo en marcha; los datos '
+        + 'de hoy llegan en unos minutos.';
+    } else if (viejo) {
+      // La hora que importa es la del ultimo dato de verdad, no la de
+      // generacion del fichero: al republicar un informe, el fichero es de
+      // ahora y el dato puede ser de hace un dia.
+      // Sin ultimo_dato NO se pone la hora de generacion: es AHORA MISMO, y
+      // el aviso acababa diciendo "no se actualizan desde las 15:25" en un
+      // fichero recien escrito a las 15:25, con el subtitulo de arriba
+      // diciendo "actualizado a las 15:25". Si no se sabe desde cuando, se
+      // dice lo que se sabe y nada mas.
+      var u = datos.ultimo_dato ? new Date(datos.ultimo_dato) : null;
+      if (u && !isNaN(u.getTime())) {
+        var mismoDia = u.toDateString() === new Date().toDateString();
+        aviso.textContent = 'Estos datos no se actualizan desde ' +
+          (mismoDia ? 'las ' : '') +
+          u.toLocaleString('es-ES', mismoDia
+            ? {hour: '2-digit', minute: '2-digit'}
+            : {day: '2-digit', month: '2-digit', hour: '2-digit',
+               minute: '2-digit'}) +
+          '. Puede que el equipo esté apagado.';
+      } else {
+        aviso.textContent = 'El equipo no está enviando datos ahora mismo. '
+          + 'Puede que esté apagado.';
+      }
     }
 
-    if (diaVisible === null) { diaVisible = datos.dia; }
+    ajustarSemana();
+    if (diaVisible === null) { diaVisible = diaInicial(); }
     pintarAhora();
     pintarSelector();
     pintarGrafica();
